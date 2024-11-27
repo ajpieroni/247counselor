@@ -4,7 +4,7 @@
 import os
 import logging
 import json
-from typing import List
+from typing import List, Dict
 from typing_extensions import TypedDict
 
 # Enable logging (optional)
@@ -16,7 +16,6 @@ print("Starting counselor.py script...")
 from langchain.prompts import PromptTemplate
 from langchain.chat_models import ChatOllama
 from langchain.schema import HumanMessage
-from langgraph.graph import END, StateGraph
 
 # Define the LLM
 local_llm = 'llama2'
@@ -30,7 +29,7 @@ except Exception as e:
 
 # Categories and subcategories
 CATEGORIES = {
-    "Academics": ["Courses", "Standardized Testing", "Gap Analysis"],
+    "Academics": ["Course Selection", "Standardized Testing", "Gap Analysis"],
     "Extracurricular Activities": ["Clubs", "Sports", "Volunteer Work", "Leadership Opportunities"],
     "Personal Development": ["Self-Reflection", "Growth Comparisons"],
     "College Applications": ["Essay Guidance", "Application Tracker", "College List", "Scholarships"],
@@ -47,12 +46,13 @@ class GraphState(TypedDict):
     probes: List[str]
     recommendations: List[str]
     feedback: str
-    user_profile: dict  # To store user data
+    user_profile: Dict[str, str]  # To store user data
+    additional_info: Dict[str, str]  # To store answers to additional probes
 
 # Counselor response generation prompt
 generate_prompt = PromptTemplate(
     template="""
-You are an expert college counselor providing personalized advice to high school students. Offer tailored guidance based on the user's profile, including GPA, extracurricular activities, zipcode, and high school size. Focus on the category of {category} and subcategory of {subcategory}.
+You are an experienced and empathetic college counselor providing personalized advice to high school students. Offer tailored guidance based on the user's profile and additional information. Be as specific and personalized as possible, addressing the student's individual situation, goals, and challenges. Focus on the category of {category} and subcategory of {subcategory}.
 
 User's Context: {user_context}
 
@@ -62,9 +62,22 @@ Extracurricular Activities: {extracurriculars}
 Zipcode: {zipcode}
 High School Size: {high_school_size}
 
+Additional Information:
+{additional_info}
+
 User's Message: {user_message}
 """,
-    input_variables=["user_context", "user_message", "category", "subcategory", "gpa", "extracurriculars", "zipcode", "high_school_size"],
+    input_variables=[
+        "user_context",
+        "user_message",
+        "category",
+        "subcategory",
+        "gpa",
+        "extracurriculars",
+        "zipcode",
+        "high_school_size",
+        "additional_info",
+    ],
 )
 
 # Routing prompt
@@ -89,35 +102,7 @@ User's Message: {user_message}
     input_variables=["user_message", "categories"],
 )
 
-# Prerequisite check prompt
-prerequisite_prompt = PromptTemplate(
-    template="""
-Check if the necessary data exists in the user's profile to provide personalized recommendations in the category of {category} and subcategory {subcategory}. Specifically, check for the following base-level metrics:
-
-- GPA
-- Extracurricular Activities
-- Zipcode
-- High School Size
-
-Respond with {{ "data_exists": true }} if all the data exists, or {{ "data_exists": false }} if any of it is missing.
-""",
-    input_variables=["category", "subcategory"],
-)
-
-# Probing prompt for missing base-level metrics
-probe_prompt = PromptTemplate(
-    template="""
-Ask the user for the following missing information to provide personalized recommendations:
-
-{missing_metrics}
-
-Provide your output in JSON format as follows:
-{{ "probes": ["Question 1", "Question 2", ...] }}
-""",
-    input_variables=["missing_metrics"],
-)
-
-# Define functions for each node
+# Define functions for each step
 
 def select_category(state):
     print("\n===== Step: Selecting Category =====")
@@ -170,11 +155,11 @@ def select_category(state):
     return state
 
 def prerequisite_check(state):
-    print("\n===== Step: Performing Prerequisite Check =====")
+    print("\n===== Step: Checking Profile Information =====")
     # Simulate checking user's profile for base-level metrics
     user_profile = state.get('user_profile', {})
     required_metrics = ['gpa', 'extracurriculars', 'zipcode', 'high_school_size']
-    missing_metrics = [metric for metric in required_metrics if metric not in user_profile]
+    missing_metrics = [metric for metric in required_metrics if not user_profile.get(metric)]
     if missing_metrics:
         state['data_check'] = False
         state['missing_metrics'] = missing_metrics
@@ -183,27 +168,8 @@ def prerequisite_check(state):
         state['missing_metrics'] = []
     return state
 
-def inform_or_probe(state):
-    data_check = state.get('data_check', False)
-    if data_check:
-        # Inform the user
-        return inform(state)
-    else:
-        # Probe for missing base-level metrics
-        return probe(state)
-
-def inform(state):
-    print("\n===== Step: Informing User =====")
-    # Fetch known data from user profile
-    user_profile = state.get('user_profile', {})
-    known_data = f"GPA: {user_profile.get('gpa')}, Extracurricular Activities: {user_profile.get('extracurriculars')}, Zipcode: {user_profile.get('zipcode')}, High School Size: {user_profile.get('high_school_size')}."
-    response = f"We have your profile information: {known_data}"
-    print(f"\n{response}")
-    state['response'] = response
-    return state
-
-def probe(state):
-    print("\n===== Step: Collecting Necessary Information =====")
+def collect_profile_info(state):
+    print("\n===== Step: Collecting Profile Information =====")
     missing_metrics = state.get('missing_metrics', [])
     user_profile = state.get('user_profile', {})
     # Ask user for missing base-level metrics
@@ -223,8 +189,52 @@ def probe(state):
     state['user_profile'] = user_profile
     # After collecting missing data, set data_check to True
     state['data_check'] = True
-    # Inform the user with the updated profile
-    return inform(state)
+    return state
+
+def inform(state):
+    print("\n===== Step: Reviewing Your Profile =====")
+    # Fetch known data from user profile
+    user_profile = state.get('user_profile', {})
+    known_data = f"GPA: {user_profile.get('gpa')}, Extracurricular Activities: {user_profile.get('extracurriculars')}, Zipcode: {user_profile.get('zipcode')}, High School Size: {user_profile.get('high_school_size')}."
+    response = f"We have noted your profile information: {known_data}"
+    print(f"\n{response}")
+    state['response'] = response
+    return state
+
+def probe_for_details(state):
+    print("\n===== Step: Gathering Additional Information =====")
+    category = state['category']
+    subcategory = state['subcategory']
+    # Define additional questions based on category and subcategory
+    additional_questions = []
+    if category == 'Academics' and subcategory == 'Course Selection':
+        additional_questions = [
+            "Which science courses have you taken so far?",
+            "Are you interested in Advanced Placement (AP) or International Baccalaureate (IB) courses?",
+            "Do you have any specific colleges or programs in mind?",
+            "What are your strengths and weaknesses in academics?",
+        ]
+    elif category == 'Extracurricular Activities' and subcategory == 'Leadership Opportunities':
+        additional_questions = [
+            "What leadership roles have you held in your extracurricular activities?",
+            "Are there specific leadership positions you're aiming for?",
+            "How do you think these roles will contribute to your future goals?",
+            "What challenges have you faced in leadership roles before?",
+        ]
+    else:
+        additional_questions = [
+            "Please provide more details about your interests and goals.",
+            "Are there any specific challenges you're facing?",
+            "What do you hope to achieve in this area?",
+            "Is there anything else you'd like to share?",
+        ]
+    # Collect user's answers
+    additional_info = {}
+    for question in additional_questions:
+        answer = input(f"{question}\nYour answer: ")
+        additional_info[question] = answer
+    state['additional_info'] = additional_info
+    return state
 
 def recommend(state):
     print("\n===== Step: Generating Personalized Recommendations =====")
@@ -233,19 +243,13 @@ def recommend(state):
     category = state['category']
     subcategory = state['subcategory']
     user_profile = state.get('user_profile', {})
+    additional_info = state.get('additional_info', {})
     gpa = user_profile.get('gpa', 'N/A')
     extracurriculars = user_profile.get('extracurriculars', 'N/A')
     zipcode = user_profile.get('zipcode', 'N/A')
     high_school_size = user_profile.get('high_school_size', 'N/A')
-
-    # For future RAG implementation:
-    # Here is where you can integrate Retrieval-Augmented Generation (RAG) to enhance recommendations.
-    # Steps to implement RAG:
-    # 1. Use user's context, message, and profile to query a vector store of documents.
-    # 2. Retrieve relevant documents based on similarity search.
-    # 3. Include retrieved information in the prompt to the LLM.
-
-    # For now, we'll fetch the LLM response without RAG.
+    additional_info_str = "\n".join([f"{k}: {v}" for k, v in additional_info.items()])
+    
     chain_input = {
         "user_context": user_context,
         "user_message": user_message,
@@ -255,6 +259,7 @@ def recommend(state):
         "extracurriculars": extracurriculars,
         "zipcode": zipcode,
         "high_school_size": high_school_size,
+        "additional_info": additional_info_str,
     }
     prompt = generate_prompt.format(**chain_input)
     messages = [HumanMessage(content=prompt)]
@@ -278,47 +283,37 @@ def update_profile(state):
     print("Your profile has been updated with the new information.")
     return state
 
-# Build the state-based workflow using StateGraph
-
-# Initialize the workflow
-workflow = StateGraph(GraphState)
-
-# Add nodes
-workflow.add_node("select_category", select_category)
-workflow.add_node("prerequisite_check", prerequisite_check)
-workflow.add_node("inform_or_probe", inform_or_probe)
-workflow.add_node("recommend", recommend)
-workflow.add_node("get_feedback", get_feedback)
-workflow.add_node("update_profile", update_profile)
-
-# Define edges
-workflow.set_entry_point("select_category")
-workflow.add_edge("select_category", "prerequisite_check")
-workflow.add_edge("prerequisite_check", "inform_or_probe")
-workflow.add_edge("inform_or_probe", "recommend")
-workflow.add_edge("recommend", "get_feedback")
-workflow.add_edge("get_feedback", "update_profile")
-workflow.add_edge("update_profile", END)
-
-# Compile the workflow
-kyros_agent = workflow.compile()
-
-# Define the function to run the agent
-def run_kyros_counselor():
+def run_counselor():
     print("\n===== Welcome to KYROS AI Counselor =====")
     user_context = input("Please provide some context about yourself (e.g., 'I am a 10th-grade student interested in engineering'): ")
     user_message = input("\nHow can I assist you today?\nYour message: ")
     state = {
-        "user_context": user_context,
-        "user_message": user_message,
-        "user_profile": {},  # Initialize an empty user profile
+        'user_context': user_context,
+        'user_message': user_message,
+        'user_profile': {},
+        'additional_info': {},
     }
-    state = kyros_agent.invoke(state)
+    # Step 2: Select category
+    state = select_category(state)
+    # Step 3: Prerequisite check
+    state = prerequisite_check(state)
+    if not state['data_check']:
+        # Step 4: Collect profile info
+        state = collect_profile_info(state)
+    # Step 5: Inform user
+    state = inform(state)
+    # Step 6: Probe for additional details
+    state = probe_for_details(state)
+    # Step 7: Generate recommendations
+    state = recommend(state)
+    # Step 8: Get feedback
+    state = get_feedback(state)
+    # Step 9: Update profile
+    state = update_profile(state)
     print("\n===== Thank you for using KYROS AI Counselor! =====\n")
 
-# Run the counselor if executed as a script
 if __name__ == "__main__":
     try:
-        run_kyros_counselor()
+        run_counselor()
     except Exception as e:
         print(f"An error occurred: {e}")
