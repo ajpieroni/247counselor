@@ -1,0 +1,31 @@
+# Ignore all virtual environments
+venv/
+venv312test/
+venv314/
+
+# Byte-compiled files
+*.pyc
+*.pyo
+__pycache__/
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Python environment files
+*.env
+*.venv
+*.virtualenv
+
+# IDE or editor specific files
+.idea/
+.vscode/
+
+# Ignore test or temp files if applicable
+*.bak
+*.swp
+*.swo
