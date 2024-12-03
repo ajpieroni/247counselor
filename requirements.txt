@@ -1,0 +1,12 @@
+# Core dependencies
+requests>=2.28.0
+typing-extensions>=4.0.0
+
+# LangChain dependencies
+langchain>=0.0.200
+
+# Local LLM integration
+llama-cpp-python>=0.1.50
+
+# Logging configuration (optional, standard library available)
+langchain-community>=0.1.0  # Example, update with the correct version if needed
